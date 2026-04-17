@@ -105,3 +105,41 @@ app.post("/generate-text", (req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port " + PORT);
 });
+
+// 🖼 IMAGE GENERATE
+app.post("/generate", (req, res) => {
+  res.json({
+    success: true,
+    result: "Sample product description generated from image"
+  });
+});
+
+// 🧠 GENERATE FROM FORM
+app.post("/generate-from-form", (req, res) => {
+  const { description, formFields } = req.body;
+
+  const fields = formFields.map(f => ({
+    selector: f.selector,
+    label: f.label,
+    value: "Sample Value"
+  }));
+
+  res.json({
+    success: true,
+    fields
+  });
+});
+
+// ✍️ GENERATE FROM TEXT
+app.post("/generate-from-text", (req, res) => {
+  const { description } = req.body;
+
+  res.json({
+    success: true,
+    fields: {
+      product_name: "Demo Product",
+      description: description,
+      meesho_price: "299"
+    }
+  });
+});
