@@ -1,7 +1,7 @@
 import express from "express";
 import cors from "cors";
 import fs from "fs";
-import OpenAI from "openai";
+import OpenAI from "openai"
 
 const app = express();
 app.use(cors());
@@ -9,10 +9,14 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
 
-// 📦 simple DB file
+// ✅ HEALTH CHECK
+app.get("/", (req, res) => {
+  res.send("Server is running ✅");
+});
+
+// 📦 DB
 const DB_FILE = "./db.json";
 
-// load DB
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, JSON.stringify({ licenses: [] }, null, 2));
@@ -20,7 +24,6 @@ function loadDB() {
   return JSON.parse(fs.readFileSync(DB_FILE));
 }
 
-// save DB
 function saveDB(data) {
   fs.writeFileSync(DB_FILE, JSON.stringify(data, null, 2));
 }
@@ -29,9 +32,7 @@ function generateKey() {
   return "MEESHO-" + Math.random().toString(36).substr(2, 8).toUpperCase();
 }
 
-//
-// 🔐 VALIDATE LICENSE
-//
+// 🔐 VALIDATE
 app.post("/validate-license", (req, res) => {
   const { licenseKey, deviceId } = req.body;
 
@@ -42,7 +43,6 @@ app.post("/validate-license", (req, res) => {
     return res.json({ success: false, valid: false, error: "Invalid key" });
   }
 
-  // device lock
   if (key.deviceId && key.deviceId !== deviceId) {
     return res.json({
       success: false,
@@ -55,7 +55,6 @@ app.post("/validate-license", (req, res) => {
     key.deviceId = deviceId;
   }
 
-  // expiry check
   if (new Date() > new Date(key.expiry)) {
     return res.json({
       success: false,
@@ -66,7 +65,7 @@ app.post("/validate-license", (req, res) => {
 
   saveDB(db);
 
-  return res.json({
+  res.json({
     success: true,
     valid: true,
     plan: key.plan,
@@ -75,9 +74,7 @@ app.post("/validate-license", (req, res) => {
   });
 });
 
-//
-// 🔑 GENERATE KEY (admin)
-//
+// 🔑 GENERATE KEY
 app.post("/admin/generate-key", (req, res) => {
   const { days = 30 } = req.body;
 
@@ -96,9 +93,7 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
-//
-// 🤖 AI TEXT (dummy)
-//
+// 🤖 AI
 app.post("/generate-text", (req, res) => {
   res.json({
     title: "Generated Product",
@@ -107,4 +102,6 @@ app.post("/generate-text", (req, res) => {
   });
 });
 
-app.listen(PORT, () => console.log("Server running"));
+app.listen(PORT, () => {
+  console.log("Server running on port " + PORT);
+});
