@@ -1,17 +1,16 @@
 import express from "express";
 import cors from "cors";
 import fs from "fs";
-import OpenAI from "openai"
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 8080;
 
-// ✅ HEALTH CHECK
+// ✅ ROOT ROUTE (ONLY ONCE)
 app.get("/", (req, res) => {
-  res.send("Server is running ✅");
+  res.status(200).send("Server is running ✅");
 });
 
 // 📦 DB
@@ -93,7 +92,7 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
-// 🤖 AI
+// 🤖 AI (dummy)
 app.post("/generate-text", (req, res) => {
   res.json({
     title: "Generated Product",
@@ -102,6 +101,7 @@ app.post("/generate-text", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+// ✅ ONLY ONE LISTEN (IMPORTANT)
+app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port " + PORT);
 });
