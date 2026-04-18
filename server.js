@@ -44,34 +44,63 @@ function generateKey() {
 // 🔐 LICENSE
 app.post("/validate-license", (req, res) => {
   const { licenseKey, deviceId } = req.body;
-  const db = loadDB();
 
+  if (!licenseKey || !deviceId) {
+    return res.json({ success: false, valid: false, error: "Missing data" });
+  }
+
+  const db = loadDB();
   const key = db.licenses.find(k => k.key === licenseKey);
-  if (!key) return res.json({ success: false, valid: false });
+
+  if (!key) {
+    return res.json({ success: false, valid: false, error: "Invalid key" });
+  }
 
   if (key.deviceId && key.deviceId !== deviceId) {
-    return res.json({ success: false, valid: false, error: "Used on another device" });
+    return res.json({
+      success: false,
+      valid: false,
+      error: "Used on another device"
+    });
   }
 
-  if (!key.deviceId) key.deviceId = deviceId;
-
-  if (new Date() > new Date(key.expiry)) {
-    return res.json({ success: false, valid: false, error: "Expired" });
+  if (!key.deviceId) {
+    key.deviceId = deviceId;
   }
+
+  const now = new Date();
+  const expiry = new Date(key.expiry);
+
+  if (now > expiry) {
+    return res.json({
+      success: false,
+      valid: false,
+      error: "Subscription expired"
+    });
+  }
+
+  const remainingDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
 
   saveDB(db);
-  res.json({ success: true, valid: true });
+
+  res.json({
+    success: true,
+    valid: true,
+    expiry: key.expiry,
+    remainingDays
+  });
 });
 
 // 🔑 ADMIN
 app.post("/admin/generate-key", (req, res) => {
   const { days = 30 } = req.body;
+
   const db = loadDB();
 
   const newKey = {
     key: generateKey(),
     plan: "monthly",
-    expiry: new Date(Date.now() + days * 86400000),
+    expiry: new Date(Date.now() + days * 86400000).toISOString(),
     deviceId: null
   };
 
@@ -80,7 +109,6 @@ app.post("/admin/generate-key", (req, res) => {
 
   res.json({ success: true, key: newKey });
 });
-
 // 🧠 PROMPT
 const TEXT_PROMPT = `
 Return ONLY JSON:
