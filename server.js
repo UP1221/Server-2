@@ -170,6 +170,7 @@ Return JSON mapping field -> value
 });
 
 // 🖼 IMAGE
+// 🖼 IMAGE (FIXED)
 app.post("/generate", upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
@@ -184,10 +185,12 @@ app.post("/generate", upload.single("image"), async (req, res) => {
         {
           role: "user",
           content: [
-            { type: "text", text: "Describe product and generate listing" },
+            { type: "text", text: "Describe this product and generate listing details." },
             {
-              type: "input_image",
-              image_url: `data:image/jpeg;base64,${imageB64}`
+              type: "image_url",
+              image_url: {
+                url: `data:image/jpeg;base64,${imageB64}`
+              }
             }
           ]
         }
@@ -200,11 +203,13 @@ app.post("/generate", upload.single("image"), async (req, res) => {
     });
 
   } catch (e) {
-    console.error(e);
-    res.json({ success: false, error: "Image AI failed" });
+    console.error("🔥 IMAGE ERROR:", e);
+    res.status(500).json({
+      success: false,
+      error: e.message || "Image AI failed"
+    });
   }
 });
-
 // ❤️ HEALTH
 app.get("/health", (req, res) => {
   res.json({
