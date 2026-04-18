@@ -1,18 +1,20 @@
-import dotenv from "dotenv";
-dotenv.config();
-
 import express from "express";
 import cors from "cors";
 import multer from "multer";
 import fs from "fs";
 import OpenAI from "openai";
+
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
 
-// 🔐 OpenAI
+// 🔐 OpenAI (Railway env)
+if (!process.env.OPENAI_API_KEY) {
+  console.error("❌ OPENAI_API_KEY missing in Railway variables");
+}
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
   timeout: 30000
@@ -21,7 +23,7 @@ const openai = new OpenAI({
 // 📦 Upload (image)
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 📦 DB (file based license)
+// 📦 DB (simple file storage)
 const DB_FILE = "./db.json";
 
 function loadDB() {
@@ -58,11 +60,10 @@ app.post("/validate-license", (req, res) => {
   }
 
   saveDB(db);
-
   res.json({ success: true, valid: true });
 });
 
-// 🔑 ADMIN KEY
+// 🔑 ADMIN
 app.post("/admin/generate-key", (req, res) => {
   const { days = 30 } = req.body;
   const db = loadDB();
@@ -80,7 +81,7 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
-// 🧠 PROMPT (STRONG FROM OLD SERVER)
+// 🧠 PROMPT
 const TEXT_PROMPT = `
 Return ONLY JSON:
 {
@@ -98,13 +99,9 @@ Return ONLY JSON:
 }
 `;
 
-// ✅ TEXT GENERATION (FIXED ENDPOINT)
+// ✅ TEXT
 app.post("/generate-from-text", async (req, res) => {
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return res.json({ success: false, error: "Missing API key" });
-    }
-
     const { description } = req.body;
 
     const response = await openai.chat.completions.create({
@@ -115,19 +112,25 @@ app.post("/generate-from-text", async (req, res) => {
       ]
     });
 
-    let text = response.choices[0].message.content;
+    let text = response.choices?.[0]?.message?.content || "";
     text = text.replace(/```json|```/g, "").trim();
 
-    const parsed = JSON.parse(text);
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return res.json({ success: false, error: "AI returned invalid JSON", raw: text });
+    }
 
     res.json({ success: true, fields: parsed });
 
   } catch (e) {
+    console.error(e);
     res.json({ success: false, error: "AI failed" });
   }
 });
 
-// 🧠 FORM GENERATION (KEEP OLD STRUCTURE)
+// 🧠 FORM
 app.post("/generate-from-form", async (req, res) => {
   try {
     const { description, formFields } = req.body;
@@ -143,10 +146,15 @@ Return JSON mapping field -> value
       messages: [{ role: "user", content: prompt }]
     });
 
-    let text = response.choices[0].message.content;
+    let text = response.choices?.[0]?.message?.content || "";
     text = text.replace(/```json|```/g, "").trim();
 
-    const parsed = JSON.parse(text);
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return res.json({ success: false, error: "AI JSON error", raw: text });
+    }
 
     const fields = formFields.map(f => ({
       selector: f.selector,
@@ -155,14 +163,19 @@ Return JSON mapping field -> value
 
     res.json({ success: true, fields });
 
-  } catch {
+  } catch (e) {
+    console.error(e);
     res.json({ success: false, error: "AI failed" });
   }
 });
 
-// 🖼 IMAGE GENERATION (FIXED FORMAT)
+// 🖼 IMAGE
 app.post("/generate", upload.single("image"), async (req, res) => {
   try {
+    if (!req.file) {
+      return res.json({ success: false, error: "No image uploaded" });
+    }
+
     const imageB64 = req.file.buffer.toString("base64");
 
     const response = await openai.chat.completions.create({
@@ -183,17 +196,21 @@ app.post("/generate", upload.single("image"), async (req, res) => {
 
     res.json({
       success: true,
-      result: response.choices[0].message.content
+      result: response.choices?.[0]?.message?.content || ""
     });
 
-  } catch {
-    res.json({ success: false, error: "Image failed" });
+  } catch (e) {
+    console.error(e);
+    res.json({ success: false, error: "Image AI failed" });
   }
 });
 
 // ❤️ HEALTH
 app.get("/health", (req, res) => {
-  res.json({ status: "ok" });
+  res.json({
+    status: "ok",
+    openai: !!process.env.OPENAI_API_KEY
+  });
 });
 
 // 🚀 START
