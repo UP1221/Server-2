@@ -5,6 +5,8 @@ import fs from "fs";
 import OpenAI from "openai";
 
 const app = express();
+
+// ✅ REQUIRED CORS FIX
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
@@ -13,7 +15,6 @@ app.use(cors({
 
 app.options("*", cors());
 
-app.use(express.json());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
