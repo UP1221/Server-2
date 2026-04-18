@@ -217,3 +217,16 @@ app.get("/health", (req, res) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on ${PORT}`);
 });
+
+app.get("/test-openai", async (req, res) => {
+  try {
+    const r = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [{ role: "user", content: "Say hello" }]
+    });
+    res.json({ ok: true, reply: r.choices?.[0]?.message?.content });
+  } catch (e) {
+    console.error("TEST ERROR:", e);
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
