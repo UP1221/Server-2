@@ -3,22 +3,23 @@ import cors from "cors";
 import fs from "fs";
 import OpenAI from "openai";
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
-});
-
 const app = express();
 app.use(cors());
 app.use(express.json());
 
 const PORT = process.env.PORT || 8080;
 
-// ✅ ROOT ROUTE (ONLY ONCE)
-app.get("/", (req, res) => {
-  res.status(200).send("Server is running ✅");
+// 🔐 OpenAI
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
 });
 
-// 📦 DB
+// ✅ ROOT
+app.get("/", (req, res) => {
+  res.send("Server is running ✅");
+});
+
+// 📦 DB (TEMP - file based)
 const DB_FILE = "./db.json";
 
 function loadDB() {
@@ -36,7 +37,7 @@ function generateKey() {
   return "MEESHO-" + Math.random().toString(36).substr(2, 8).toUpperCase();
 }
 
-// 🔐 VALIDATE
+// 🔐 LICENSE VALIDATION
 app.post("/validate-license", (req, res) => {
   const { licenseKey, deviceId } = req.body;
 
@@ -74,7 +75,9 @@ app.post("/validate-license", (req, res) => {
     valid: true,
     plan: key.plan,
     expiry: key.expiry,
-    remainingDays: Math.ceil((new Date(key.expiry) - new Date()) / (1000 * 60 * 60 * 24))
+    remainingDays: Math.ceil(
+      (new Date(key.expiry) - new Date()) / (1000 * 60 * 60 * 24)
+    )
   });
 });
 
@@ -97,28 +100,51 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
-// 🤖 AI (dummy)
-app.post("/generate-text", (req, res) => {
-  res.json({
-    title: "Generated Product",
-    description: "AI generated description",
-    price: 299
-  });
+// 🤖 TEXT AI
+app.post("/generate-text", async (req, res) => {
+  try {
+    const { description } = req.body;
+
+    const prompt = `
+Create a high-converting Meesho product listing.
+
+Input:
+${description}
+
+Return ONLY JSON:
+{
+  "product_name": "...",
+  "description": "...",
+  "price": "...",
+  "brand": "...",
+  "category": "..."
+}
+`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [{ role: "user", content: prompt }]
+    });
+
+    let text = response.choices[0].message.content;
+    text = text.replace(/```json|```/g, "").trim();
+
+    let parsed = {};
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return res.json({ success: false, error: "AI JSON error", raw: text });
+    }
+
+    res.json({ success: true, fields: parsed });
+
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false, error: "AI failed" });
+  }
 });
 
-// ✅ ONLY ONE LISTEN (IMPORTANT)
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on port " + PORT);
-});
-
-// 🖼 IMAGE GENERATE
-app.post("/generate", (req, res) => {
-  res.json({
-    success: true,
-    result: "Sample product description generated from image"
-  });
-});
-
+// 🧠 FORM AI
 app.post("/generate-from-form", async (req, res) => {
   try {
     const { description, formFields } = req.body;
@@ -126,15 +152,13 @@ app.post("/generate-from-form", async (req, res) => {
     const fieldList = formFields.map(f => f.label).join(", ");
 
     const prompt = `
-You are an expert e-commerce assistant.
-
-Generate realistic product data for these fields:
+Generate realistic product values for fields:
 ${fieldList}
 
 Product description:
 ${description}
 
-Return ONLY JSON in this format:
+Return ONLY JSON:
 {
   "field_name": "value"
 }
@@ -142,24 +166,27 @@ Return ONLY JSON in this format:
 
     const response = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      messages: [
-        { role: "system", content: "You generate structured product data." },
-        { role: "user", content: prompt }
-      ],
+      messages: [{ role: "user", content: prompt }],
       temperature: 0.7
     });
 
     let text = response.choices[0].message.content;
-
-    // clean JSON if wrapped
     text = text.replace(/```json|```/g, "").trim();
 
-    const parsed = JSON.parse(text);
+    let parsed = {};
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return res.json({ success: false, error: "AI JSON error", raw: text });
+    }
 
     const fields = formFields.map(f => ({
       selector: f.selector,
       label: f.label,
-      value: parsed[f.label] || ""
+      value:
+        parsed[f.label] ||
+        parsed[f.label?.toLowerCase()] ||
+        ""
     }));
 
     res.json({ success: true, fields });
@@ -170,16 +197,36 @@ Return ONLY JSON in this format:
   }
 });
 
-// ✍️ GENERATE FROM TEXT
-app.post("/generate-from-text", (req, res) => {
-  const { description } = req.body;
+// 🖼 IMAGE AI
+app.post("/generate", async (req, res) => {
+  try {
+    const { imageUrl } = req.body;
 
-  res.json({
-    success: true,
-    fields: {
-      product_name: "Demo Product",
-      description: description,
-      meesho_price: "299"
-    }
-  });
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [
+        {
+          role: "user",
+          content: [
+            { type: "text", text: "Describe this product and generate listing details." },
+            { type: "image_url", image_url: { url: imageUrl } }
+          ]
+        }
+      ]
+    });
+
+    res.json({
+      success: true,
+      result: response.choices[0].message.content
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false, error: "Image AI failed" });
+  }
+});
+
+// 🚀 START SERVER
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("Server running on port " + PORT);
 });
