@@ -1,25 +1,33 @@
-import express from "express";
-import cors from "cors";
-import fs from "fs";
-import OpenAI from "openai";
+/**
+ * FINAL MERGED SERVER (OLD + NEW CLEAN)
+ * Run: node server.js
+ * npm install express cors multer openai dotenv fs
+ */
+
+require("dotenv").config();
+
+const express = require("express");
+const cors = require("cors");
+const multer = require("multer");
+const fs = require("fs");
+const OpenAI = require("openai");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 5001;
 
 // 🔐 OpenAI
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 30000
 });
 
-// ✅ ROOT
-app.get("/", (req, res) => {
-  res.send("Server is running ✅");
-});
+// 📦 Upload (image)
+const upload = multer({ storage: multer.memoryStorage() });
 
-// 📦 DB (TEMP - file based)
+// 📦 DB (file based license)
 const DB_FILE = "./db.json";
 
 function loadDB() {
@@ -37,54 +45,32 @@ function generateKey() {
   return "MEESHO-" + Math.random().toString(36).substr(2, 8).toUpperCase();
 }
 
-// 🔐 LICENSE VALIDATION
+// 🔐 LICENSE
 app.post("/validate-license", (req, res) => {
   const { licenseKey, deviceId } = req.body;
-
   const db = loadDB();
-  const key = db.licenses.find(k => k.key === licenseKey);
 
-  if (!key) {
-    return res.json({ success: false, valid: false, error: "Invalid key" });
-  }
+  const key = db.licenses.find(k => k.key === licenseKey);
+  if (!key) return res.json({ success: false, valid: false });
 
   if (key.deviceId && key.deviceId !== deviceId) {
-    return res.json({
-      success: false,
-      valid: false,
-      error: "Used on another device"
-    });
+    return res.json({ success: false, valid: false, error: "Used on another device" });
   }
 
-  if (!key.deviceId) {
-    key.deviceId = deviceId;
-  }
+  if (!key.deviceId) key.deviceId = deviceId;
 
   if (new Date() > new Date(key.expiry)) {
-    return res.json({
-      success: false,
-      valid: false,
-      error: "Expired"
-    });
+    return res.json({ success: false, valid: false, error: "Expired" });
   }
 
   saveDB(db);
 
-  res.json({
-    success: true,
-    valid: true,
-    plan: key.plan,
-    expiry: key.expiry,
-    remainingDays: Math.ceil(
-      (new Date(key.expiry) - new Date()) / (1000 * 60 * 60 * 24)
-    )
-  });
+  res.json({ success: true, valid: true });
 });
 
-// 🔑 GENERATE KEY
+// 🔑 ADMIN KEY
 app.post("/admin/generate-key", (req, res) => {
   const { days = 30 } = req.body;
-
   const db = loadDB();
 
   const newKey = {
@@ -100,129 +86,101 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
-// 🤖 TEXT AI
-app.post("/generate-text", async (req, res) => {
-  try {
-    const { description } = req.body;
-
-    const prompt = `
-Create a high-converting Meesho product listing.
-
-Input:
-${description}
-
+// 🧠 PROMPT (STRONG FROM OLD SERVER)
+const TEXT_PROMPT = `
 Return ONLY JSON:
 {
-  "product_name": "...",
-  "description": "...",
-  "price": "...",
-  "brand": "...",
-  "category": "..."
+  "product_name": "",
+  "color": "",
+  "meesho_price": "",
+  "product_mrp": "",
+  "inventory": "",
+  "supplier_gst_percent": "",
+  "hsn_code": "",
+  "product_weight_in_gms": "",
+  "category": "",
+  "brand": "",
+  "description": ""
 }
 `;
 
+// ✅ TEXT GENERATION (FIXED ENDPOINT)
+app.post("/generate-from-text", async (req, res) => {
+  try {
+    if (!process.env.OPENAI_API_KEY) {
+      return res.json({ success: false, error: "Missing API key" });
+    }
+
+    const { description } = req.body;
+
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "system", content: TEXT_PROMPT },
+        { role: "user", content: description }
+      ]
+    });
+
+    let text = response.choices[0].message.content;
+    text = text.replace(/```json|```/g, "").trim();
+
+    const parsed = JSON.parse(text);
+
+    res.json({ success: true, fields: parsed });
+
+  } catch (e) {
+    res.json({ success: false, error: "AI failed" });
+  }
+});
+
+// 🧠 FORM GENERATION (KEEP OLD STRUCTURE)
+app.post("/generate-from-form", async (req, res) => {
+  try {
+    const { description, formFields } = req.body;
+
+    const prompt = `
+Fields: ${formFields.map(f => f.label).join(", ")}
+Description: ${description}
+Return JSON mapping field -> value
+`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }]
     });
 
     let text = response.choices[0].message.content;
     text = text.replace(/```json|```/g, "").trim();
 
-    let parsed = {};
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return res.json({ success: false, error: "AI JSON error", raw: text });
-    }
-
-    res.json({ success: true, fields: parsed });
-
-  } catch (err) {
-    console.error(err);
-    res.json({ success: false, error: "AI failed" });
-  }
-});
-
-// 🧠 FORM AI
-app.post("/generate-from-form", async (req, res) => {
-  try {
-    const { description, formFields } = req.body;
-
-    const fieldList = formFields.map(f => f.label).join(", ");
-
-    const prompt = `
-Generate realistic product values for fields:
-${fieldList}
-
-Product description:
-${description}
-
-Return ONLY JSON:
-{
-  "field_name": "value"
-}
-`;
-
-    const response = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0.7
-    });
-
-    let text = response.choices[0].message.content;
-    text = text.replace(/```json|```/g, "").trim();
-
-    let parsed = {};
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return res.json({ success: false, error: "AI JSON error", raw: text });
-    }
+    const parsed = JSON.parse(text);
 
     const fields = formFields.map(f => ({
       selector: f.selector,
-      label: f.label,
-      value:
-        parsed[f.label] ||
-        parsed[f.label?.toLowerCase()] ||
-        ""
+      value: parsed[f.label] || ""
     }));
 
     res.json({ success: true, fields });
 
-  } catch (err) {
-    console.error(err);
+  } catch {
     res.json({ success: false, error: "AI failed" });
   }
 });
 
-// 🖼 IMAGE AI
-app.post("/generate", async (req, res) => {
+// 🖼 IMAGE GENERATION (FIXED FORMAT)
+app.post("/generate", upload.single("image"), async (req, res) => {
   try {
-    const { imageBase64 } = req.body;
-
-    console.log("REQ BODY:", req.body);
-
-    if (!imageBase64) {
-      return res.json({ success: false, error: "No image provided" });
-    }
+    const imageB64 = req.file.buffer.toString("base64");
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4.1-mini",
+      model: "gpt-4o-mini",
       messages: [
         {
           role: "user",
           content: [
+            { type: "text", text: "Describe product and generate listing" },
             {
-              type: "text",
-              text: "Analyze this product image and generate title, description, and price."
-            },
-            {
-              type: "image_url",
-              image_url: {
-                url: imageBase64
-              }
+              type: "input_image",
+              image_url: `data:image/jpeg;base64,${imageB64}`
             }
           ]
         }
@@ -234,13 +192,17 @@ app.post("/generate", async (req, res) => {
       result: response.choices[0].message.content
     });
 
-  } catch (err) {
-    console.error("IMAGE ERROR:", err);
-    res.json({ success: false, error: err.message });
+  } catch {
+    res.json({ success: false, error: "Image failed" });
   }
 });
 
-// 🚀 START SERVER
+// ❤️ HEALTH
+app.get("/health", (req, res) => {
+  res.json({ status: "ok" });
+});
+
+// 🚀 START
 app.listen(PORT, "0.0.0.0", () => {
-  console.log("Server running on port " + PORT);
+  console.log(`🚀 Server running on ${PORT}`);
 });
