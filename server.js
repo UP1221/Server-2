@@ -200,16 +200,30 @@ Return ONLY JSON:
 // 🖼 IMAGE AI
 app.post("/generate", async (req, res) => {
   try {
-    const { imageUrl } = req.body;
-  console.log("REQ BODY:", req.body);
+    const { imageBase64 } = req.body;
+
+    console.log("REQ BODY:", req.body);
+
+    if (!imageBase64) {
+      return res.json({ success: false, error: "No image provided" });
+    }
+
     const response = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
       messages: [
         {
           role: "user",
           content: [
-            { type: "text", text: "Describe this product and generate listing details." },
-            { type: "image_url", image_url: { url: imageUrl } }
+            {
+              type: "text",
+              text: "Analyze this product image and generate title, description, and price."
+            },
+            {
+              type: "image_url",
+              image_url: {
+                url: imageBase64
+              }
+            }
           ]
         }
       ]
@@ -221,8 +235,8 @@ app.post("/generate", async (req, res) => {
     });
 
   } catch (err) {
-    console.error(err);
-    res.json({ success: false, error: "Image AI failed" });
+    console.error("IMAGE ERROR:", err);
+    res.json({ success: false, error: err.message });
   }
 });
 
