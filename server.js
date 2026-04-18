@@ -59,9 +59,10 @@ function validateLicenseCore(licenseKey, deviceId) {
 
   if (!key) return { ok: false, error: "Invalid key" };
 
-  if (key.deviceId && key.deviceId !== deviceId) {
-    return { ok: false, error: "Used on another device" };
-  }
+if (key.deviceId && key.deviceId !== deviceId) {
+  console.log("⚠ Device changed → resetting binding");
+  key.deviceId = deviceId; // 🔥 allow reuse
+}
 
   if (!key.deviceId) {
     key.deviceId = deviceId;
