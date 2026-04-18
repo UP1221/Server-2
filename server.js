@@ -119,20 +119,55 @@ app.post("/generate", (req, res) => {
   });
 });
 
-// 🧠 GENERATE FROM FORM
-app.post("/generate-from-form", (req, res) => {
-  const { description, formFields } = req.body;
+app.post("/generate-from-form", async (req, res) => {
+  try {
+    const { description, formFields } = req.body;
 
-  const fields = formFields.map(f => ({
-    selector: f.selector,
-    label: f.label,
-    value: "Sample Value"
-  }));
+    const fieldList = formFields.map(f => f.label).join(", ");
 
-  res.json({
-    success: true,
-    fields
-  });
+    const prompt = `
+You are an expert e-commerce assistant.
+
+Generate realistic product data for these fields:
+${fieldList}
+
+Product description:
+${description}
+
+Return ONLY JSON in this format:
+{
+  "field_name": "value"
+}
+`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4.1-mini",
+      messages: [
+        { role: "system", content: "You generate structured product data." },
+        { role: "user", content: prompt }
+      ],
+      temperature: 0.7
+    });
+
+    let text = response.choices[0].message.content;
+
+    // clean JSON if wrapped
+    text = text.replace(/```json|```/g, "").trim();
+
+    const parsed = JSON.parse(text);
+
+    const fields = formFields.map(f => ({
+      selector: f.selector,
+      label: f.label,
+      value: parsed[f.label] || ""
+    }));
+
+    res.json({ success: true, fields });
+
+  } catch (err) {
+    console.error(err);
+    res.json({ success: false, error: "AI failed" });
+  }
 });
 
 // ✍️ GENERATE FROM TEXT
