@@ -6,15 +6,14 @@ import OpenAI from "openai";
 
 const app = express();
 
-// ✅ REQUIRED CORS FIX
+// ✅ FIX 1: Expanded CORS for Chrome Extension compatibility
 app.use(cors({
   origin: "*",
   methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-admin-key"]
+  allowedHeaders: ["Content-Type", "x-admin-key", "Authorization"]
 }));
 
 app.options("*", cors());
-
 app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
@@ -76,26 +75,21 @@ function validateLicenseCore(licenseKey, deviceId) {
   }
 
   const remainingDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
-
   saveDB(db);
 
-  return {
-    ok: true,
-    expiry: key.expiry,
-    remainingDays
-  };
+  return { ok: true, expiry: key.expiry, remainingDays };
 }
 
 // 🔐 MIDDLEWARE (PROTECT AI ROUTES)
 function requireLicense(req, res, next) {
+  // In multipart/form-data (image upload), body is populated AFTER multer
   const { licenseKey, deviceId } = req.body;
 
   if (!licenseKey || !deviceId) {
-    return res.status(401).json({ success: false, error: "License required" });
+    return res.status(401).json({ success: false, error: "License and Device ID required" });
   }
 
   const result = validateLicenseCore(licenseKey, deviceId);
-
   if (!result.ok) {
     return res.status(403).json({ success: false, error: result.error });
   }
@@ -115,16 +109,10 @@ function requireAdmin(req, res, next) {
 // 🔐 VALIDATE LICENSE (PUBLIC)
 app.post("/validate-license", (req, res) => {
   const { licenseKey, deviceId } = req.body;
-
-  if (!licenseKey || !deviceId) {
-    return res.json({ success: false, valid: false, error: "Missing data" });
-  }
+  if (!licenseKey || !deviceId) return res.json({ success: false, valid: false, error: "Missing data" });
 
   const result = validateLicenseCore(licenseKey, deviceId);
-
-  if (!result.ok) {
-    return res.json({ success: false, valid: false, error: result.error });
-  }
+  if (!result.ok) return res.json({ success: false, valid: false, error: result.error });
 
   res.json({
     success: true,
@@ -137,45 +125,30 @@ app.post("/validate-license", (req, res) => {
 // 🔑 ADMIN: GENERATE KEY
 app.post("/admin/generate-key", requireAdmin, (req, res) => {
   const { days = 30 } = req.body;
-
   const db = loadDB();
-
   const newKey = {
     key: generateKey(),
     plan: "monthly",
     expiry: new Date(Date.now() + days * 86400000).toISOString(),
     deviceId: null
   };
-
   db.licenses.push(newKey);
   saveDB(db);
-
   res.json({ success: true, key: newKey });
 });
 
 // 🧠 PROMPT
-const TEXT_PROMPT = `
-Return ONLY JSON:
+const TEXT_PROMPT = `Return ONLY pure JSON. No markdown blocks.
 {
-  "product_name": "",
-  "color": "",
-  "meesho_price": "",
-  "product_mrp": "",
-  "inventory": "",
-  "supplier_gst_percent": "",
-  "hsn_code": "",
-  "product_weight_in_gms": "",
-  "category": "",
-  "brand": "",
-  "description": ""
-}
-`;
+  "product_name": "", "color": "", "meesho_price": "", "product_mrp": "", 
+  "inventory": "", "supplier_gst_percent": "", "hsn_code": "", 
+  "product_weight_in_gms": "", "category": "", "brand": "", "description": ""
+}`;
 
 // ✅ TEXT (PROTECTED)
 app.post("/generate-from-text", requireLicense, async (req, res) => {
   try {
     const { description } = req.body;
-
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
@@ -186,13 +159,9 @@ app.post("/generate-from-text", requireLicense, async (req, res) => {
 
     let text = response.choices?.[0]?.message?.content || "";
     text = text.replace(/```json|```/g, "").trim();
-
-    const parsed = JSON.parse(text);
-
-    res.json({ success: true, fields: parsed });
-
-  } catch {
-    res.json({ success: false, error: "AI failed" });
+    res.json({ success: true, fields: JSON.parse(text) });
+  } catch (err) {
+    res.json({ success: false, error: "AI processing failed" });
   }
 });
 
@@ -200,21 +169,15 @@ app.post("/generate-from-text", requireLicense, async (req, res) => {
 app.post("/generate-from-form", requireLicense, async (req, res) => {
   try {
     const { description, formFields } = req.body;
-
-    const prompt = `
-Fields: ${formFields.map(f => f.label).join(", ")}
-Description: ${description}
-Return JSON mapping field -> value
-`;
-
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }]
+      messages: [
+        { role: "system", content: "Return ONLY pure JSON mapping field labels to values. No markdown." },
+        { role: "user", content: `Fields: ${formFields.map(f => f.label).join(", ")}\nDescription: ${description}` }
+      ]
     });
 
-    let text = response.choices?.[0]?.message?.content || "";
-    text = text.replace(/```json|```/g, "").trim();
-
+    let text = (response.choices?.[0]?.message?.content || "").replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(text);
 
     const fields = formFields.map(f => ({
@@ -223,34 +186,26 @@ Return JSON mapping field -> value
     }));
 
     res.json({ success: true, fields });
-
   } catch {
-    res.json({ success: false, error: "AI failed" });
+    res.json({ success: false, error: "AI mapping failed" });
   }
 });
 
 // 🖼 IMAGE (PROTECTED)
-app.post("/generate", requireLicense, upload.single("image"), async (req, res) => {
+// ✅ FIX 2: Reordered - upload.single MUST come before requireLicense
+app.post("/generate", upload.single("image"), requireLicense, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.json({ success: false, error: "No image uploaded" });
-    }
+    if (!req.file) return res.json({ success: false, error: "No image uploaded" });
 
     const imageB64 = req.file.buffer.toString("base64");
-
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
           role: "user",
           content: [
-            { type: "text", text: "Describe product and generate listing" },
-            {
-              type: "image_url",
-              image_url: {
-                url: `data:image/jpeg;base64,${imageB64}`
-              }
-            }
+            { type: "text", text: "Analyze this image and generate a professional product listing." },
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageB64}` } }
           ]
         }
       ]
@@ -260,7 +215,6 @@ app.post("/generate", requireLicense, upload.single("image"), async (req, res) =
       success: true,
       result: response.choices?.[0]?.message?.content || ""
     });
-
   } catch (e) {
     res.status(500).json({ success: false, error: e.message });
   }
@@ -268,10 +222,7 @@ app.post("/generate", requireLicense, upload.single("image"), async (req, res) =
 
 // ❤️ HEALTH
 app.get("/health", (req, res) => {
-  res.json({
-    status: "ok",
-    openai: !!process.env.OPENAI_API_KEY
-  });
+  res.json({ status: "ok", openai: !!process.env.OPENAI_API_KEY });
 });
 
 // 🚀 START
