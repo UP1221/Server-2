@@ -5,7 +5,15 @@ import fs from "fs";
 import OpenAI from "openai";
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-admin-key"]
+}));
+
+app.options("*", cors());
+
+app.use(express.json());
 app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
