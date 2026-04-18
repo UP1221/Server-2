@@ -10,9 +10,12 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 5001;
 
-// 🔐 OpenAI (Railway env)
+// 🔐 ENV
+const ADMIN_KEY = process.env.ADMIN_KEY || "change_this_secure_key";
+
+// 🔐 OpenAI
 if (!process.env.OPENAI_API_KEY) {
-  console.error("❌ OPENAI_API_KEY missing in Railway variables");
+  console.error("❌ OPENAI_API_KEY missing");
 }
 
 const openai = new OpenAI({
@@ -20,10 +23,10 @@ const openai = new OpenAI({
   timeout: 30000
 });
 
-// 📦 Upload (image)
+// 📦 Upload
 const upload = multer({ storage: multer.memoryStorage() });
 
-// 📦 DB (simple file storage)
+// 📦 DB
 const DB_FILE = "./db.json";
 
 function loadDB() {
@@ -41,27 +44,15 @@ function generateKey() {
   return "MEESHO-" + Math.random().toString(36).substr(2, 8).toUpperCase();
 }
 
-// 🔐 LICENSE
-app.post("/validate-license", (req, res) => {
-  const { licenseKey, deviceId } = req.body;
-
-  if (!licenseKey || !deviceId) {
-    return res.json({ success: false, valid: false, error: "Missing data" });
-  }
-
+// 🔐 LICENSE VALIDATION (CORE)
+function validateLicenseCore(licenseKey, deviceId) {
   const db = loadDB();
   const key = db.licenses.find(k => k.key === licenseKey);
 
-  if (!key) {
-    return res.json({ success: false, valid: false, error: "Invalid key" });
-  }
+  if (!key) return { ok: false, error: "Invalid key" };
 
   if (key.deviceId && key.deviceId !== deviceId) {
-    return res.json({
-      success: false,
-      valid: false,
-      error: "Used on another device"
-    });
+    return { ok: false, error: "Used on another device" };
   }
 
   if (!key.deviceId) {
@@ -72,27 +63,70 @@ app.post("/validate-license", (req, res) => {
   const expiry = new Date(key.expiry);
 
   if (now > expiry) {
-    return res.json({
-      success: false,
-      valid: false,
-      error: "Subscription expired"
-    });
+    return { ok: false, error: "Subscription expired" };
   }
 
   const remainingDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
 
   saveDB(db);
 
+  return {
+    ok: true,
+    expiry: key.expiry,
+    remainingDays
+  };
+}
+
+// 🔐 MIDDLEWARE (PROTECT AI ROUTES)
+function requireLicense(req, res, next) {
+  const { licenseKey, deviceId } = req.body;
+
+  if (!licenseKey || !deviceId) {
+    return res.status(401).json({ success: false, error: "License required" });
+  }
+
+  const result = validateLicenseCore(licenseKey, deviceId);
+
+  if (!result.ok) {
+    return res.status(403).json({ success: false, error: result.error });
+  }
+
+  req.license = result;
+  next();
+}
+
+// 🔐 ADMIN PROTECT
+function requireAdmin(req, res, next) {
+  if (req.headers["x-admin-key"] !== ADMIN_KEY) {
+    return res.status(401).json({ success: false, error: "Unauthorized" });
+  }
+  next();
+}
+
+// 🔐 VALIDATE LICENSE (PUBLIC)
+app.post("/validate-license", (req, res) => {
+  const { licenseKey, deviceId } = req.body;
+
+  if (!licenseKey || !deviceId) {
+    return res.json({ success: false, valid: false, error: "Missing data" });
+  }
+
+  const result = validateLicenseCore(licenseKey, deviceId);
+
+  if (!result.ok) {
+    return res.json({ success: false, valid: false, error: result.error });
+  }
+
   res.json({
     success: true,
     valid: true,
-    expiry: key.expiry,
-    remainingDays
+    expiry: result.expiry,
+    remainingDays: result.remainingDays
   });
 });
 
-// 🔑 ADMIN
-app.post("/admin/generate-key", (req, res) => {
+// 🔑 ADMIN: GENERATE KEY
+app.post("/admin/generate-key", requireAdmin, (req, res) => {
   const { days = 30 } = req.body;
 
   const db = loadDB();
@@ -109,6 +143,7 @@ app.post("/admin/generate-key", (req, res) => {
 
   res.json({ success: true, key: newKey });
 });
+
 // 🧠 PROMPT
 const TEXT_PROMPT = `
 Return ONLY JSON:
@@ -127,8 +162,8 @@ Return ONLY JSON:
 }
 `;
 
-// ✅ TEXT
-app.post("/generate-from-text", async (req, res) => {
+// ✅ TEXT (PROTECTED)
+app.post("/generate-from-text", requireLicense, async (req, res) => {
   try {
     const { description } = req.body;
 
@@ -143,23 +178,17 @@ app.post("/generate-from-text", async (req, res) => {
     let text = response.choices?.[0]?.message?.content || "";
     text = text.replace(/```json|```/g, "").trim();
 
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return res.json({ success: false, error: "AI returned invalid JSON", raw: text });
-    }
+    const parsed = JSON.parse(text);
 
     res.json({ success: true, fields: parsed });
 
-  } catch (e) {
-    console.error(e);
+  } catch {
     res.json({ success: false, error: "AI failed" });
   }
 });
 
-// 🧠 FORM
-app.post("/generate-from-form", async (req, res) => {
+// 🧠 FORM (PROTECTED)
+app.post("/generate-from-form", requireLicense, async (req, res) => {
   try {
     const { description, formFields } = req.body;
 
@@ -177,12 +206,7 @@ Return JSON mapping field -> value
     let text = response.choices?.[0]?.message?.content || "";
     text = text.replace(/```json|```/g, "").trim();
 
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return res.json({ success: false, error: "AI JSON error", raw: text });
-    }
+    const parsed = JSON.parse(text);
 
     const fields = formFields.map(f => ({
       selector: f.selector,
@@ -191,15 +215,13 @@ Return JSON mapping field -> value
 
     res.json({ success: true, fields });
 
-  } catch (e) {
-    console.error(e);
+  } catch {
     res.json({ success: false, error: "AI failed" });
   }
 });
 
-// 🖼 IMAGE
-// 🖼 IMAGE (FIXED)
-app.post("/generate", upload.single("image"), async (req, res) => {
+// 🖼 IMAGE (PROTECTED)
+app.post("/generate", requireLicense, upload.single("image"), async (req, res) => {
   try {
     if (!req.file) {
       return res.json({ success: false, error: "No image uploaded" });
@@ -213,7 +235,7 @@ app.post("/generate", upload.single("image"), async (req, res) => {
         {
           role: "user",
           content: [
-            { type: "text", text: "Describe this product and generate listing details." },
+            { type: "text", text: "Describe product and generate listing" },
             {
               type: "image_url",
               image_url: {
@@ -231,13 +253,10 @@ app.post("/generate", upload.single("image"), async (req, res) => {
     });
 
   } catch (e) {
-    console.error("🔥 IMAGE ERROR:", e);
-    res.status(500).json({
-      success: false,
-      error: e.message || "Image AI failed"
-    });
+    res.status(500).json({ success: false, error: e.message });
   }
 });
+
 // ❤️ HEALTH
 app.get("/health", (req, res) => {
   res.json({
@@ -249,17 +268,4 @@ app.get("/health", (req, res) => {
 // 🚀 START
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on ${PORT}`);
-});
-
-app.get("/test-openai", async (req, res) => {
-  try {
-    const r = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: "Say hello" }]
-    });
-    res.json({ ok: true, reply: r.choices?.[0]?.message?.content });
-  } catch (e) {
-    console.error("TEST ERROR:", e);
-    res.status(500).json({ ok: false, error: e.message });
-  }
 });
