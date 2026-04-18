@@ -4,6 +4,10 @@ import fs from "fs";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
+  apiKey: "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",
+});
+
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
