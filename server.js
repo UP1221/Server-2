@@ -201,7 +201,7 @@ Return ONLY JSON:
 app.post("/generate", async (req, res) => {
   try {
     const { imageUrl } = req.body;
-
+  console.log("REQ BODY:", req.body);
     const response = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
       messages: [
