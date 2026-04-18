@@ -1,17 +1,11 @@
-/**
- * FINAL MERGED SERVER (OLD + NEW CLEAN)
- * Run: node server.js
- * npm install express cors multer openai dotenv fs
- */
+import dotenv from "dotenv";
+dotenv.config();
 
-require("dotenv").config();
-
-const express = require("express");
-const cors = require("cors");
-const multer = require("multer");
-const fs = require("fs");
-const OpenAI = require("openai");
-
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import fs from "fs";
+import OpenAI from "openai";
 const app = express();
 app.use(cors());
 app.use(express.json());
