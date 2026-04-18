@@ -59,15 +59,16 @@ function validateLicenseCore(licenseKey, deviceId) {
 
   if (!key) return { ok: false, error: "Invalid key" };
 
-if (key.deviceId && key.deviceId !== deviceId) {
-  console.log("⚠ Device changed → resetting binding");
-  key.deviceId = deviceId; // 🔥 allow reuse
-}
-
+  // 🔥 ALWAYS bind / rebind device safely
   if (!key.deviceId) {
+    key.deviceId = deviceId;
+    console.log("✅ First time binding device:", deviceId);
+  } else if (key.deviceId !== deviceId) {
+    console.log("⚠ Device changed → reassigning");
     key.deviceId = deviceId;
   }
 
+  // ⏱ expiry check
   const now = new Date();
   const expiry = new Date(key.expiry);
 
@@ -75,12 +76,13 @@ if (key.deviceId && key.deviceId !== deviceId) {
     return { ok: false, error: "Subscription expired" };
   }
 
-  const remainingDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+  // 💾 ALWAYS save after any change
   saveDB(db);
+
+  const remainingDays = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
 
   return { ok: true, expiry: key.expiry, remainingDays };
 }
-
 // 🔐 MIDDLEWARE (PROTECT AI ROUTES)
 function requireLicense(req, res, next) {
   // In multipart/form-data (image upload), body is populated AFTER multer
