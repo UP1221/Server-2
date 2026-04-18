@@ -1,6 +1,11 @@
 import express from "express";
 import cors from "cors";
 import fs from "fs";
+import OpenAI from "openai";
+
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY
+});
 
 const app = express();
 app.use(cors());
