@@ -1,39 +1,29 @@
-import express from "express";
-import cors from "cors";
-import multer from "multer";
-import fs from "fs";
-import OpenAI from "openai";
-
+/**
+ * Meesho AI Listing Generator - Node.js Backend Server
+ * Run: node server.js
+ * Requires: npm install express cors openai dotenv
+ */
+require('dotenv').config();
+const express = require('express');
+const cors    = require('cors');
+const multer  = require('multer');
+const fs      = require('fs');
+const path    = require('path');
 const app = express();
-
-/* ================== CORS ================== */
-app.use(cors({
-  origin: "*",
-  methods: ["GET", "POST", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "x-admin-key", "Authorization"]
-}));
-app.options("*", cors());
-app.use(express.json());
-
 const PORT = process.env.PORT || 5001;
 
-/* ================== OPENAI ================== */
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-  timeout: 30000
-});
-
-/* ================== MULTER ================== */
-const upload = multer({ storage: multer.memoryStorage() });
-
-/* ================== DB ================== */
+/* ================== LICENSE SYSTEM (NEW) ================== */
 const DB_FILE = "./db.json";
 
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, JSON.stringify({ licenses: [] }, null, 2));
   }
+ try {
   return JSON.parse(fs.readFileSync(DB_FILE));
+} catch {
+  return { licenses: [] };
+}
 }
 
 function saveDB(data) {
@@ -44,50 +34,128 @@ function generateKey() {
   return "MEESHO-" + Math.random().toString(36).substr(2, 8).toUpperCase();
 }
 
-/* ================== LICENSE ================== */
 function validateLicenseCore(licenseKey, deviceId) {
   const db = loadDB();
   const key = db.licenses.find(k => k.key === licenseKey);
 
   if (!key) return { ok: false, error: "Invalid key" };
 
-  if (!key.deviceId || key.deviceId !== deviceId) {
+  if (!key.deviceId) {
     key.deviceId = deviceId;
+  } else if (key.deviceId !== deviceId) {
+    return { ok: false, error: "Device mismatch" };
   }
 
-  const now = new Date();
-  const expiry = new Date(key.expiry);
-
-  if (now > expiry) {
+  if (new Date() > new Date(key.expiry)) {
     return { ok: false, error: "Expired" };
   }
 
   saveDB(db);
-
-  return {
-    ok: true,
-    expiry: key.expiry
-  };
+  return { ok: true };
 }
+
+const ADMIN_KEY = process.env.ADMIN_KEY || "admin";
+
+
 
 function requireLicense(req, res, next) {
   const { licenseKey, deviceId } = req.body;
 
   if (!licenseKey || !deviceId) {
-    return res.status(401).json({ success: false });
+    return res.status(401).json({ success: false, error: "Missing license/device" });
   }
 
   const result = validateLicenseCore(licenseKey, deviceId);
   if (!result.ok) {
-    return res.status(403).json({ success: false });
+    return res.status(403).json({ success: false, error: result.error });
   }
 
   next();
 }
 
-/* ================== ADMIN ================== */
-const ADMIN_KEY = process.env.ADMIN_KEY || "admin";
 
+
+// ── OpenAI setup ─────────────────────────────────────────────────────────────
+let openai = null;
+try {
+  const { OpenAI } = require('openai');
+  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
+} catch (e) {
+  console.error('❌ openai package not found. Run: npm install openai');
+}
+
+
+
+
+// Multer for image uploads (memory storage)
+const upload = multer({ storage: multer.memoryStorage() });
+
+// ── License Validation Middleware ────────────────────────────────────────────
+
+// ── License Validation Endpoint ──────────────────────────────────────────────
+
+// ── Admin Endpoints (Password Protected) ──────────────────────────────────────
+
+// Admin: Generate new license key
+
+
+// Admin: Get all license keys
+
+// Admin: Deactivate a license key
+
+
+// Admin: Get key info
+
+
+// Admin: Get stats
+
+
+// ── Prompts ───────────────────────────────────────────────────────────────────
+const TEXT_SYSTEM_PROMPT = `
+You are a Meesho product listing expert. Given a product description, extract and generate structured listing fields.
+
+Return ONLY a valid JSON object with these exact keys (use empty string "" if unknown):
+{
+  "product_name": "Full product name (max 100 chars)",
+  "color": "Primary color(s) of the product",
+  "meesho_price": "Selling price in INR (numbers only, no ₹ symbol)",
+  "product_mrp": "MRP in INR (numbers only)",
+  "only_wrong_return_price": "Wrong return price in INR (usually 0)",
+  "inventory": "Stock quantity (number only)",
+  "supplier_gst_percent": "GST percentage (e.g. 5, 12, 18 — number only)",
+  "hsn_code": "HSN code for the product category",
+  "product_weight_in_gms": "Product weight in grams (number only)",
+  "supplier_product_id": "A short unique SKU/product ID (e.g. SKU-001)",
+  "category": "Meesho product category",
+  "brand": "Brand name if mentioned, else empty string",
+  "description": "A compelling 2-3 sentence product description for buyers"
+}
+
+Rules:
+- All price/number fields must contain ONLY digits (no currency symbols, no units)
+- If GST is not mentioned, infer from product type (clothing=5%, electronics=18%, home=12%)
+- If HSN is not mentioned, infer from product category
+- If weight is not mentioned, estimate based on product type
+- Return ONLY the JSON object, no markdown, no explanation
+`.trim();
+
+const IMAGE_SYSTEM_PROMPT = `
+You are a Meesho product listing expert. Analyze the product image and generate a complete listing description.
+Return a detailed text description including: product name, color, material, style, use case, and suggested price range.
+`.trim();
+
+const FIELD_KEYS = [
+  'product_name', 'color', 'meesho_price', 'product_mrp',
+  'only_wrong_return_price', 'inventory', 'supplier_gst_percent',
+  'hsn_code', 'product_weight_in_gms', 'supplier_product_id',
+  'category', 'brand', 'description'
+];
+
+// ── Middleware ────────────────────────────────────────────────────────────────
+app.use(cors({ origin: '*' }));
+app.use(express.json());
+
+//admin key
 app.post("/admin/generate-key", (req, res) => {
   if (req.headers["x-admin-key"] !== ADMIN_KEY) {
     return res.status(401).json({ success: false });
@@ -108,139 +176,421 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
-/* ================== HELPERS ================== */
-function enforceLength(text, len) {
-  if (!text) return "";
-  if (text.length >= len) return text.substring(0, len);
-  while (text.length < len) text += " extra quality product";
-  return text.substring(0, len);
-}
-
-/* ================== TEXT ================== */
-app.post("/generate-from-text", requireLicense, async (req, res) => {
+// ── POST /generate-from-text ──────────────────────────────────────────────────
+app.post('/generate-from-text', requireLicense, async (req, res) => {
   try {
     const { description } = req.body;
+    if (!description || !description.trim()) {
+      return res.status(400).json({ success: false, error: "Missing 'description' in request body" });
+    }
 
-    const prompt = `
-Return ONLY JSON.
-
-Fill ALL fields. Never leave empty.
-
-{
- "product_name":"",
- "color":"",
- "meesho_price":"",
- "product_mrp":"",
- "inventory":"",
- "supplier_gst_percent":"",
- "hsn_code":"",
- "product_weight_in_gms":"",
- "category":"",
- "brand":"",
- "description":""
-}
-
-Description: ${description}
-`;
+    if (!openai) {
+      return res.status(500).json({ success: false, error: 'OpenAI package not available' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not set. Create a .env file with OPENAI_API_KEY=sk-...' });
+    }
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt }]
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: TEXT_SYSTEM_PROMPT },
+        { role: 'user',   content: `Product description: ${description.trim()}` }
+      ],
+      temperature: 0.3,
+      max_tokens: 600
     });
 
-    let text = response.choices[0].message.content
-      .replace(/```json|```/g, "")
-      .trim();
+    let raw = response.choices[0].message.content.trim();
 
-    let parsed = JSON.parse(text);
+    // Strip markdown code fences if present
+    if (raw.startsWith('```')) {
+      raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
 
-    parsed.product_name = enforceLength(parsed.product_name, 150);
-    parsed.description = enforceLength(parsed.description, 600);
+    const parsed = JSON.parse(raw);
 
-    res.json({ success: true, fields: parsed });
+    // Ensure all expected keys exist as strings
+    const fields = {};
+    for (const key of FIELD_KEYS) {
+      fields[key] = String(parsed[key] || '').trim();
+    }
 
-  } catch {
-    res.json({ success: false });
+    return res.json({ success: true, fields });
+
+  } catch (err) {
+    console.error('❌ /generate-from-text error:', err.message);
+    if (err instanceof SyntaxError) {
+      return res.status(500).json({ success: false, error: 'AI returned invalid JSON. Try again.' });
+    }
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/* ================== FORM (BEST VERSION) ================== */
-app.post("/generate-from-form", requireLicense, async (req, res) => {
+// ── POST /generate (image) ────────────────────────────────────────────────────
+app.post('/generate', requireLicense, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image file provided' });
+    }
+
+    if (!openai) {
+      return res.status(500).json({ success: false, error: 'OpenAI package not available' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not set' });
+    }
+
+    const imageB64  = req.file.buffer.toString('base64');
+    const mimeType  = req.file.mimetype || 'image/jpeg';
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: IMAGE_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,${imageB64}` }
+            },
+            {
+              type: 'text',
+              text: 'Analyze this product image and generate a complete Meesho listing description.'
+            }
+          ]
+        }
+      ],
+      temperature: 0.4,
+      max_tokens: 800
+    });
+
+    const result = response.choices[0].message.content.trim();
+    return res.json({ success: true, result });
+
+  } catch (err) {
+    console.error('❌ /generate error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// ── Length enforcement helpers ────────────────────────────────────────────────
+
+/**
+ * Pads or truncates product_name to exactly `targetLen` characters.
+ * Padding uses comma-separated SEO keywords.
+ */
+function enforceProductNameLength(name, targetLen = 300) {
+  if (!name) return name;
+  if (name.length >= targetLen) return name.substring(0, targetLen);
+  const keywords = [
+    'Durable Quality', 'Long Lasting', 'Easy to Use', 'Lightweight Design',
+    'Compact Size', 'Multi Purpose', 'Versatile Product', 'Modern Style',
+    'Attractive Look', 'Great Value', 'Functional Design', 'Practical Use',
+    'Quality Material', 'Reliable Product', 'Stylish Finish', 'Smooth Texture',
+    'Sturdy Build', 'Eco Friendly', 'Washable Material', 'Reusable Design'
+  ];
+  let padded = name;
+  for (const kw of keywords) {
+    if (padded.length >= targetLen) break;
+    const addition = ', ' + kw;
+    if (padded.length + addition.length <= targetLen) {
+      padded += addition;
+    } else {
+      const remaining = targetLen - padded.length;
+      if (remaining > 3) padded += addition.substring(0, remaining);
+      break;
+    }
+  }
+  // Final pad with spaces if still short
+  while (padded.length < targetLen) padded += ' ';
+  return padded.substring(0, targetLen);
+}
+
+/**
+ * Pads or truncates description to exactly `targetLen` characters.
+ * Padding uses generic SEO-friendly product sentences with rich keywords.
+ */
+function enforceDescriptionLength(desc, targetLen = 1400) {
+  if (!desc) return desc;
+  if (desc.length >= targetLen) return desc.substring(0, targetLen);
+  const additions = [
+    ' This product is crafted with attention to detail, ensuring durability and long-lasting performance for daily use.',
+    ' The ergonomic design ensures comfortable handling and ease of use for all users across different age groups.',
+    ' Made from high-quality materials, this product meets strict quality standards and delivers consistent results.',
+    ' The compact and lightweight design makes it easy to store and carry, perfect for travel and outdoor use.',
+    ' Easy to clean and maintain, ensuring hygiene and longevity of the product with minimal effort required.',
+    ' Available in attractive designs, this product enhances the visual appeal of any space it is placed in.',
+    ' A reliable and affordable choice for those seeking quality, value, and functionality in a single product.',
+    ' Suitable for gifting on occasions like birthdays, anniversaries, and festivals, making it a thoughtful choice.',
+    ' The product undergoes rigorous quality checks to ensure it meets the highest standards before reaching customers.',
+    ' Order now and experience the perfect blend of style, functionality, and durability in this exceptional product.',
+    ' Ideal for indoor and outdoor use, this versatile product adapts to a wide range of settings and requirements.',
+    ' The smooth finish and polished look make it an attractive addition to any collection or living space.',
+    ' Designed for long-term use, this product resists wear and tear, maintaining its original quality over time.',
+    ' A must-have product for modern households, combining practicality with an elegant and contemporary aesthetic.',
+    ' The thoughtful construction ensures that every component works seamlessly together for optimal performance.',
+    ' Trusted by thousands of satisfied customers, this product has earned a reputation for reliability and value.',
+    ' Whether used professionally or casually, this product delivers consistent, high-quality results every time.',
+    ' The innovative design incorporates user feedback to provide an improved and more intuitive experience.',
+    ' Packaged securely to prevent damage during transit, ensuring the product arrives in perfect condition.',
+    ' This product is an excellent value-for-money option, offering features typically found in higher-priced alternatives.',
+    ' Crafted using eco-conscious manufacturing processes, this product is a responsible choice for mindful shoppers.',
+    ' The non-toxic, food-grade, and skin-safe materials make it suitable for use by children and adults alike.',
+    ' With its multi-functional design, this product eliminates the need for multiple separate items, saving space and cost.',
+    ' The rust-proof, waterproof, and stain-resistant surface ensures the product remains pristine even after extended use.',
+    ' Lightweight yet sturdy, this product strikes the perfect balance between portability and structural integrity.',
+    ' Designed to meet Indian household needs, this product is tailored for local preferences and usage patterns.',
+    ' The vibrant color options and modern patterns make this product a stylish and eye-catching choice.',
+    ' Backed by a quality assurance process, every unit is inspected before dispatch to ensure customer satisfaction.',
+    ' This product makes an ideal return gift, corporate gift, or festive hamper addition for all occasions.',
+    ' The wide compatibility and universal design ensure this product works seamlessly across various use cases.',
+  ];
+  let padded = desc;
+  for (const addition of additions) {
+    if (padded.length >= targetLen) break;
+    if (padded.length + addition.length <= targetLen) {
+      padded += addition;
+    } else {
+      const remaining = targetLen - padded.length;
+      if (remaining > 10) padded += addition.substring(0, remaining);
+      break;
+    }
+  }
+  // Final pad with spaces if still short
+  while (padded.length < targetLen) padded += ' ';
+  return padded.substring(0, targetLen);
+}
+
+// ── POST /generate-from-form (scan-aware) ────────────────────────────────────
+app.post('/generate-from-form', requireLicense, async (req, res) => {
   try {
     const { description, formFields } = req.body;
 
-    const fieldList = formFields.map(f => f.label).join(", ");
+    if (!description || !description.trim()) {
+      return res.status(400).json({ success: false, error: "Missing 'description' in request body" });
+    }
+    if (!formFields || !Array.isArray(formFields) || formFields.length === 0) {
+      return res.status(400).json({ success: false, error: "Missing 'formFields' array in request body" });
+    }
+    if (!openai) {
+      return res.status(500).json({ success: false, error: 'OpenAI package not available' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not set. Create a .env file with OPENAI_API_KEY=sk-...' });
+    }
 
-    const prompt = `
-You MUST fill ALL fields.
+    // Build a field list for the prompt using the actual scanned fields
+    const fieldList = formFields.map(f =>
+      `- Selector: "${f.selector}" | Label: "${f.label}" | Type: ${f.type}${f.id ? ' | ID: ' + f.id : ''}`
+    ).join('\n');
 
-Fields:
+    const prompt = `You are a Meesho product listing expert. Generate accurate, SEO-rich listing data for the product described below.
+
+The Meesho listing form has these fields (use EXACT selectors):
 ${fieldList}
 
-Rules:
-- Never skip fields
-- Always give value
-- Numbers only for price/weight
-- GST = 5
+Product description: "${description.trim()}"
 
-Return ONLY JSON
-`;
+━━━━━━━━━━━━━━━━━━━━━━
+FIXED VALUES — always use these exact values for matching fields:
+- Inventory / Stock: 100
+- Variation / Size: Free Size
+- Country of Origin: India
+- Manufacturer Name: PURVANCHAL
+- Manufacturer Address: DAWARPAR, GORAKHPUR, UTTARPRADESH
+- Manufacturer Pincode: 273016
+- Packer Name: PURVANCHAL
+- Packer Address: DAWARPAR, GORAKHPUR, UTTARPRADESH
+- Packer Pincode: 273016
+- Importer Name: PURVANCHAL
+- Importer Address: DAWARPAR, GORAKHPUR, UTTARPRADESH
+- Importer Pincode: 273016
+- Group ID: GROUP 1
+- Brand Name: (DO NOT fill — leave blank, skip this field entirely)
+
+━━━━━━━━━━━━━━━━━━━━━━
+GENERATION RULES:
+
+Product Name:
+- SEO-rich marketplace title, EXACTLY 300 characters (use the FULL 300 character limit — pad with additional keywords, colors, use-cases, materials if needed)
+- Include: Product Type + Material + Key Specs + Use-case + Color + Target Audience + Key Features
+- NO brand names
+- NO non-compliance words: you, everyday, home, homes, house, premium, safe, guaranteed, best, top
+- Include high-intent SEO keywords, synonyms, and related search terms to fill all 300 characters
+
+SKU ID: ST-<ProductType>-001 (e.g. ST-Kurti-001, ST-Dispenser-001)
+
+HSN Code: Infer from product category (e.g. clothing=6211, kitchenware=7323, plastic items=3924)
+
+GST: Always use 5 (number only, no % symbol — fixed value for all products)
+
+Price (Meesho Price): Realistic market price in INR, digits only, no ₹ symbol
+
+Weight: Realistic weight in grams, digits only
+
+Packaging Dimensions: Realistic values based on product type and size
+
+Product Dimensions: Realistic values based on product type and size
+
+Description: EXACTLY 1400 characters (use the FULL 1400 character limit). Write a detailed, SEO-rich product description that includes:
+- Product name and type
+- Material and build quality
+- Key features and specifications (at least 7-10 bullet-style points written as sentences)
+- Usage scenarios and benefits
+- Dimensions, capacity, or size details
+- Care instructions or usage tips
+- Target audience (women, men, kids, kitchen, office, travel, gifting, etc.)
+- 40+ high-intent SEO keywords naturally woven in, covering:
+    * Product type synonyms and alternate names
+    * Material keywords (e.g. stainless steel, BPA-free plastic, pure cotton, polyester, ceramic)
+    * Color and finish keywords (e.g. multicolor, printed, solid, matte, glossy)
+    * Use-case keywords (e.g. kitchen use, office use, travel friendly, outdoor, gifting, festive)
+    * Audience keywords (e.g. women, men, girls, boys, kids, adults, family)
+    * Quality keywords (e.g. durable, long-lasting, sturdy, lightweight, rust-proof, waterproof, washable)
+    * Shopping intent keywords (e.g. buy online, affordable, value for money, budget friendly, under 500)
+    * Occasion keywords (e.g. birthday gift, anniversary gift, wedding gift, Diwali, Holi, Raksha Bandhan)
+    * Trending marketplace search terms relevant to the product category
+- NO brand names. NO non-compliance words (you, everyday, home, homes, house, premium, safe, guaranteed, best, top).
+- Must be exactly 1400 characters — count carefully and pad with additional keyword-rich sentences if needed.
+
+For dropdown fields (type=select or type=dropdown): provide the most common valid option value that would appear in a Meesho dropdown (e.g. for Material: "Plastic", "Stainless Steel", "Cotton"; for Generic Name: the product type; for Net Quantity: "1"; for Packaging Unit: "cm" or "inch")
+
+━━━━━━━━━━━━━━━━━━━━━━
+Return ONLY a valid JSON array (no markdown, no explanation, no code fences):
+[
+  { "selector": "exact_selector_from_above", "value": "generated_value" }
+]
+
+IMPORTANT:
+- Use the EXACT selector strings from the field list above
+- Do NOT include Brand Name field in output
+- Do NOT include fields with empty or null values
+- For number-only fields: digits only, no symbols or units`;
 
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{ role: "user", content: prompt + description }]
+      model: 'gpt-4o-mini',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.3,
+      max_tokens: 2500
     });
 
-    let text = response.choices[0].message.content
-      .replace(/```json|```/g, "")
-      .trim();
+    let raw = response.choices[0].message.content.trim();
+    if (raw.startsWith('```')) {
+      raw = raw.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim();
+    }
 
-    const parsed = JSON.parse(text);
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (e) {
+      return res.status(500).json({ success: false, error: 'AI returned invalid JSON. Try again.' });
+    }
 
-    const fields = formFields.map(f => ({
-      selector: f.selector,
-      value: parsed[f.label] || "N/A"
-    }));
+    if (!Array.isArray(parsed)) {
+      return res.status(500).json({ success: false, error: 'AI returned unexpected format. Try again.' });
+    }
 
-    res.json({ success: true, fields });
+    // Filter out entries without selector or value
+    let fields = parsed.filter(f => f && f.selector && f.value !== undefined && String(f.value).trim() !== '');
 
-  } catch {
-    res.json({ success: false });
+    // ── Enforce exact character lengths for product_name and description ──────
+    fields = fields.map(f => {
+      const sel = String(f.selector || '');
+      const lbl = String(f.label || '').toLowerCase();
+      let val = String(f.value || '');
+
+      // Product Name → exactly 300 chars
+      if (sel.includes('product_name') || lbl.includes('product name')) {
+        val = enforceProductNameLength(val, 300);
+      }
+
+      // Description textarea → exactly 1400 chars
+      if (
+        sel.toLowerCase().includes('description') ||
+        lbl.includes('description') ||
+        sel.toLowerCase().includes('textarea')
+      ) {
+        val = enforceDescriptionLength(val, 1400);
+      }
+
+      return { ...f, value: val };
+    });
+
+    // ── Enforce price rules: wrong_return = price-1, mrp = price×4 ───────────
+    const priceField = fields.find(f =>
+      String(f.selector).includes('meesho_price') ||
+      String(f.label || '').toLowerCase().includes('meesho price')
+    );
+    if (priceField) {
+      const price = parseInt(String(priceField.value), 10);
+      if (!isNaN(price) && price > 0) {
+        const wrongReturnSel = 'input[id="only_wrong_return_price"]';
+        const mrpSel = 'input[id="product_mrp"]';
+
+        // Wrong/Defective Returns Price = Meesho Price - 1
+        const wrongIdx = fields.findIndex(f => String(f.selector).includes('only_wrong_return_price'));
+        if (wrongIdx > -1) {
+          fields[wrongIdx] = { ...fields[wrongIdx], value: String(price - 1) };
+        } else {
+          fields.push({ selector: wrongReturnSel, value: String(price - 1), label: 'Wrong/Defective Returns Price' });
+        }
+
+        // MRP = Meesho Price × 4
+        const mrpIdx = fields.findIndex(f => String(f.selector).includes('product_mrp'));
+        if (mrpIdx > -1) {
+          fields[mrpIdx] = { ...fields[mrpIdx], value: String(price * 4) };
+        } else {
+          fields.push({ selector: mrpSel, value: String(price * 4), label: 'MRP' });
+        }
+      }
+    }
+
+    return res.json({ success: true, fields, count: fields.length });
+
+  } catch (err) {
+    console.error('❌ /generate-from-form error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 
-/* ================== IMAGE ================== */
-app.post("/generate", upload.single("image"), requireLicense, async (req, res) => {
-  try {
-    const imageB64 = req.file.buffer.toString("base64");
+// ── GET /health ───────────────────────────────────────────────────────────────
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    openai_key_set: !!process.env.OPENAI_API_KEY,
+    port: PORT,
+    license_enabled: process.env.SKIP_LICENSE !== 'true'
+  });
+});
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [{
-        role: "user",
-        content: [
-          { type: "text", text: "Describe product for ecommerce listing" },
-          { type: "image_url", image_url: { url: `data:image/jpeg;base64,${imageB64}` } }
-        ]
-      }]
-    });
-
-    res.json({
-      success: true,
-      result: response.choices[0].message.content
-    });
-
-  } catch {
-    res.json({ success: false });
+// ── Start ─────────────────────────────────────────────────────────────────────
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n🚀 Meesho AI Listing Server running at http://0.0.0.0:${PORT}`);
+  console.log('   Endpoints:');
+ // console.log(`   POST http://localhost:${PORT}/validate-license    — Validate a license key`);
+  console.log(`   POST http://localhost:${PORT}/generate             — Generate from image (requires license)`);
+  console.log(`   POST http://localhost:${PORT}/generate-from-text   — Generate from text (requires license)`);
+  console.log(`   POST http://localhost:${PORT}/generate-from-form   — Generate from scanned form (requires license)`);
+  console.log(`   GET  http://localhost:${PORT}/health               — Health check`);
+  console.log('\n   Admin Endpoints (Basic Auth):');
+  console.log(`   POST http://localhost:${PORT}/admin/generate-key    — Generate new license key`);
+  console.log(`   GET  http://localhost:${PORT}/admin/keys           — List all license keys`);
+  console.log(`   GET  http://localhost:${PORT}/admin/stats           — Get license statistics`);
+  
+  if (!process.env.OPENAI_API_KEY) {
+    console.log('\n⚠️  OPENAI_API_KEY not set! Create a .env file:');
+    console.log('   echo "OPENAI_API_KEY=sk-..." > .env');
+  } else {
+    console.log('\n✅ OpenAI API key detected.');
   }
+  
+  if (process.env.SKIP_LICENSE === 'true') {
+    console.log('\n⚠️  LICENSE VALIDATION DISABLED (development mode)');
+  } else {
+    console.log('\n✅ License validation enabled.');
+  }
+  console.log('');
 });
 
-/* ================== HEALTH ================== */
-app.get("/health", (req, res) => {
-  res.json({ ok: true });
-});
-
-/* ================== START ================== */
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("🚀 Server running on " + PORT);
-});
