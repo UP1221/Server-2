@@ -141,7 +141,7 @@ You are a Meesho product listing expert. Given a product description, extract an
 
 Return ONLY a valid JSON object with these exact keys (use empty string "" if unknown):
 {
-  "product_name": "Full product name (max 100 chars)",
+  "product_name": "Full product name (max 50 chars) ",
   "color": "Primary color(s) of the product",
   "meesho_price": "Selling price in INR (numbers only, no ₹ symbol)",
   "product_mrp": "MRP in INR (numbers only)",
@@ -153,7 +153,7 @@ Return ONLY a valid JSON object with these exact keys (use empty string "" if un
   "supplier_product_id": "A short unique SKU/product ID (e.g. SKU-001)",
   "category": "Meesho product category",
   "brand": "Brand name if mentioned, else empty string",
-  "description": "A compelling 2-3 sentence product description for buyers"
+  "description": "A compelling 2-3 sentence product description for buyers(max 700 chars)"
 }
 
 Rules:
