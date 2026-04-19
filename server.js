@@ -110,6 +110,17 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
+app.post("/admin/login", (req, res) => {
+  const { password } = req.body;
+
+  const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "upanshu123";
+
+  if (password === ADMIN_PASSWORD) {
+    return res.json({ success: true });
+  }
+
+  return res.status(401).json({ success: false });
+});
 app.post('/validate-license', (req, res) => {
   const { licenseKey, deviceId } = req.body;
 
