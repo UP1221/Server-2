@@ -153,7 +153,7 @@ Return ONLY a valid JSON object with these exact keys (use empty string "" if un
   "supplier_product_id": "A short unique SKU/product ID (e.g. SKU-001)",
   "category": "Meesho product category",
   "brand": "Brand name if mentioned, else empty string",
-  "description": "A compelling 2-3 sentence product description for buyers(max 700 chars)"
+  "description": "A compelling 2-3 sentence product description for buyers(max 500 chars)"
 }
 
 Rules:
@@ -371,11 +371,11 @@ FIXED VALUES — always use these exact values for matching fields:
 GENERATION RULES:
 
 Product Name:
-- SEO-rich marketplace title, EXACTLY 300 characters (use the FULL 300 character limit — pad with additional keywords, colors, use-cases, materials if needed)
+- SEO-rich marketplace title, EXACTLY 200 characters (use the FULL 200 character limit — pad with additional keywords, colors, use-cases, materials if needed)
 - Include: Product Type + Material + Key Specs + Use-case + Color + Target Audience + Key Features
 - NO brand names
 - NO non-compliance words: you, everyday, home, homes, house, premium, safe, guaranteed, best, top
-- Include high-intent SEO keywords, synonyms, and related search terms to fill all 300 characters
+- Include high-intent SEO keywords, synonyms, and related search terms to fill all 200 characters
 
 SKU ID: ST-<ProductType>-001 (e.g. ST-Kurti-001, ST-Dispenser-001)
 
@@ -391,7 +391,7 @@ Packaging Dimensions: Realistic values based on product type and size
 
 Product Dimensions: Realistic values based on product type and size
 
-Description: EXACTLY 1400 characters (use the FULL 1400 character limit). Write a detailed, SEO-rich product description that includes:
+Description: EXACTLY 700 characters (use the FULL 700 character limit). Write a detailed, SEO-rich product description that includes:
 - Product name and type
 - Material and build quality
 - Key features and specifications (at least 7-10 bullet-style points written as sentences)
@@ -410,7 +410,7 @@ Description: EXACTLY 1400 characters (use the FULL 1400 character limit). Write 
     * Occasion keywords (e.g. birthday gift, anniversary gift, wedding gift, Diwali, Holi, Raksha Bandhan)
     * Trending marketplace search terms relevant to the product category
 - NO brand names. NO non-compliance words (you, everyday, home, homes, house, premium, safe, guaranteed, best, top).
-- Must be exactly 1400 characters — count carefully and pad with additional keyword-rich sentences if needed.
+- Must be exactly 700 characters — count carefully and pad with additional keyword-rich sentences if needed.
 
 For dropdown fields (type=select or type=dropdown): provide the most common valid option value that would appear in a Meesho dropdown (e.g. for Material: "Plastic", "Stainless Steel", "Cotton"; for Generic Name: the product type; for Net Quantity: "1"; for Packaging Unit: "cm" or "inch")
 
