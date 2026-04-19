@@ -51,9 +51,11 @@ function validateLicenseCore(licenseKey, deviceId) {
 
   if (!key) return { ok: false, error: "Invalid key" };
 
-  if (!key.deviceId || key.deviceId !== deviceId) {
-    key.deviceId = deviceId;
-  }
+ if (!key.deviceId) {
+  key.deviceId = deviceId;
+} else if (key.deviceId !== deviceId) {
+  return { ok: false, error: "Device mismatch" };
+}
 
   const now = new Date();
   const expiry = new Date(key.expiry);
