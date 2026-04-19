@@ -471,16 +471,16 @@ IMPORTANT:
 
       // Product Name → exactly 300 chars
       if (sel.includes('product_name') || lbl.includes('product name')) {
-        val = enforceProductNameLength(val, 300);
+        val = enforceProductNameLength(val, 150);
       }
 
-      // Description textarea → exactly 1400 chars
+      // Description textarea → exactly 700 chars
       if (
         sel.toLowerCase().includes('description') ||
         lbl.includes('description') ||
         sel.toLowerCase().includes('textarea')
       ) {
-        val = enforceDescriptionLength(val, 1400);
+        val = enforceDescriptionLength(val, 700);
       }
 
       return { ...f, value: val };
