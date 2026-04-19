@@ -1,28 +1,39 @@
-/**
- * Meesho AI Listing Generator - Node.js Backend Server
- * Run: node server.js
- * Requires: npm install express cors openai dotenv
- */
-const express = require('express');
-const cors    = require('cors');
-const multer  = require('multer');
-const fs      = require('fs');
-const path    = require('path');
+import express from "express";
+import cors from "cors";
+import multer from "multer";
+import fs from "fs";
+import OpenAI from "openai";
+
 const app = express();
+
+/* ================== CORS ================== */
+app.use(cors({
+  origin: "*",
+  methods: ["GET", "POST", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "x-admin-key", "Authorization"]
+}));
+app.options("*", cors());
+app.use(express.json());
+
 const PORT = process.env.PORT || 5001;
 
-/* ================== LICENSE SYSTEM (NEW) ================== */
+/* ================== OPENAI ================== */
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+  timeout: 30000
+});
+
+/* ================== MULTER ================== */
+const upload = multer({ storage: multer.memoryStorage() });
+
+/* ================== DB ================== */
 const DB_FILE = "./db.json";
 
 function loadDB() {
   if (!fs.existsSync(DB_FILE)) {
     fs.writeFileSync(DB_FILE, JSON.stringify({ licenses: [] }, null, 2));
   }
- try {
   return JSON.parse(fs.readFileSync(DB_FILE));
-} catch {
-  return { licenses: [] };
-}
 }
 
 function saveDB(data) {
@@ -33,80 +44,69 @@ function generateKey() {
   return "MEESHO-" + Math.random().toString(36).substr(2, 8).toUpperCase();
 }
 
+/* ================== LICENSE ================== */
 function validateLicenseCore(licenseKey, deviceId) {
   const db = loadDB();
   const key = db.licenses.find(k => k.key === licenseKey);
 
   if (!key) return { ok: false, error: "Invalid key" };
 
-  if (!key.deviceId) {
+  if (!key.deviceId || key.deviceId !== deviceId) {
     key.deviceId = deviceId;
-  } else if (key.deviceId !== deviceId) {
-    return { ok: false, error: "Device mismatch" };
   }
 
-  if (new Date() > new Date(key.expiry)) {
+  const now = new Date();
+  const expiry = new Date(key.expiry);
+
+  if (now > expiry) {
     return { ok: false, error: "Expired" };
   }
 
   saveDB(db);
-  return { ok: true };
+
+  return {
+    ok: true,
+    expiry: key.expiry
+  };
 }
-
-const ADMIN_KEY = process.env.ADMIN_KEY || "admin";
-
-
 
 function requireLicense(req, res, next) {
   const { licenseKey, deviceId } = req.body;
 
   if (!licenseKey || !deviceId) {
-    return res.status(401).json({ success: false, error: "Missing license/device" });
+    return res.status(401).json({ success: false });
   }
 
   const result = validateLicenseCore(licenseKey, deviceId);
   if (!result.ok) {
-    return res.status(403).json({ success: false, error: result.error });
+    return res.status(403).json({ success: false });
   }
 
   next();
 }
 
+/* ================== ADMIN ================== */
+const ADMIN_KEY = process.env.ADMIN_KEY || "admin";
 
+app.post("/admin/generate-key", (req, res) => {
+  if (req.headers["x-admin-key"] !== ADMIN_KEY) {
+    return res.status(401).json({ success: false });
+  }
 
-// ── OpenAI setup ─────────────────────────────────────────────────────────────
-let openai = null;
-try {
-  const { OpenAI } = require('openai');
-  openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' });
-} catch (e) {
-  console.error('❌ openai package not found. Run: npm install openai');
-}
+  const { days = 30 } = req.body;
+  const db = loadDB();
 
+  const newKey = {
+    key: generateKey(),
+    expiry: new Date(Date.now() + days * 86400000).toISOString(),
+    deviceId: null
+  };
 
+  db.licenses.push(newKey);
+  saveDB(db);
 
-
-// Multer for image uploads (memory storage)
-const upload = multer({ storage: multer.memoryStorage() });
-
-// ── License Validation Middleware ────────────────────────────────────────────
-
-// ── License Validation Endpoint ──────────────────────────────────────────────
-
-// ── Admin Endpoints (Password Protected) ──────────────────────────────────────
-
-// Admin: Generate new license key
-
-
-// Admin: Get all license keys
-
-// Admin: Deactivate a license key
-
-
-// Admin: Get key info
-
-
-// Admin: Get stats
+  res.json({ success: true, key: newKey });
+});
 
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
@@ -150,32 +150,16 @@ const FIELD_KEYS = [
   'category', 'brand', 'description'
 ];
 
-// ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors({ origin: '*' }));
-app.use(express.json());
 
-//admin key
-app.post("/admin/generate-key", (req, res) => {
-  if (req.headers["x-admin-key"] !== ADMIN_KEY) {
-    return res.status(401).json({ success: false });
-  }
+/* ================== HELPERS ================== */
+function enforceLength(text, len) {
+  if (!text) return "";
+  if (text.length >= len) return text.substring(0, len);
+  while (text.length < len) text += " extra quality product";
+  return text.substring(0, len);
+}
 
-  const { days = 30 } = req.body;
-  const db = loadDB();
-
-  const newKey = {
-    key: generateKey(),
-    expiry: new Date(Date.now() + days * 86400000).toISOString(),
-    deviceId: null
-  };
-
-  db.licenses.push(newKey);
-  saveDB(db);
-
-  res.json({ success: true, key: newKey });
-});
-
-// ── POST /generate-from-text ──────────────────────────────────────────────────
+/* ================== TEXT ================== */
 app.post('/generate-from-text', requireLicense, async (req, res) => {
   try {
     const { description } = req.body;
@@ -226,56 +210,6 @@ app.post('/generate-from-text', requireLicense, async (req, res) => {
   }
 });
 
-// ── POST /generate (image) ────────────────────────────────────────────────────
-app.post('/generate', requireLicense, upload.single('image'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ success: false, error: 'No image file provided' });
-    }
-
-    if (!openai) {
-      return res.status(500).json({ success: false, error: 'OpenAI package not available' });
-    }
-    if (!process.env.OPENAI_API_KEY) {
-      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not set' });
-    }
-
-    const imageB64  = req.file.buffer.toString('base64');
-    const mimeType  = req.file.mimetype || 'image/jpeg';
-
-    const response = await openai.chat.completions.create({
-      model: 'gpt-4o-mini',
-      messages: [
-        { role: 'system', content: IMAGE_SYSTEM_PROMPT },
-        {
-          role: 'user',
-          content: [
-            {
-              type: 'image_url',
-              image_url: { url: `data:${mimeType};base64,${imageB64}` }
-            },
-            {
-              type: 'text',
-              text: 'Analyze this product image and generate a complete Meesho listing description.'
-            }
-          ]
-        }
-      ],
-      temperature: 0.4,
-      max_tokens: 800
-    });
-
-    const result = response.choices[0].message.content.trim();
-    return res.json({ success: true, result });
-
-  } catch (err) {
-    console.error('❌ /generate error:', err.message);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// ── Length enforcement helpers ────────────────────────────────────────────────
-
 /**
  * Pads or truncates product_name to exactly `targetLen` characters.
  * Padding uses comma-separated SEO keywords.
@@ -306,11 +240,8 @@ function enforceProductNameLength(name, targetLen = 300) {
   while (padded.length < targetLen) padded += ' ';
   return padded.substring(0, targetLen);
 }
-
-/**
- * Pads or truncates description to exactly `targetLen` characters.
- * Padding uses generic SEO-friendly product sentences with rich keywords.
- */
+ // Padding uses generic SEO-friendly product sentences with rich keywords.
+ 
 function enforceDescriptionLength(desc, targetLen = 1400) {
   if (!desc) return desc;
   if (desc.length >= targetLen) return desc.substring(0, targetLen);
@@ -362,7 +293,8 @@ function enforceDescriptionLength(desc, targetLen = 1400) {
   return padded.substring(0, targetLen);
 }
 
-// ── POST /generate-from-form (scan-aware) ────────────────────────────────────
+
+/* ================== FORM (BEST VERSION) ================== */
 app.post('/generate-from-form', requireLicense, async (req, res) => {
   try {
     const { description, formFields } = req.body;
@@ -553,43 +485,61 @@ IMPORTANT:
     return res.status(500).json({ success: false, error: err.message });
   }
 });
+/* ================== IMAGE ================== */
+app.post('/generate', requireLicense, upload.single('image'), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ success: false, error: 'No image file provided' });
+    }
 
-// ── GET /health ───────────────────────────────────────────────────────────────
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    openai_key_set: !!process.env.OPENAI_API_KEY,
-    port: PORT,
-    license_enabled: process.env.SKIP_LICENSE !== 'true'
-  });
+    if (!openai) {
+      return res.status(500).json({ success: false, error: 'OpenAI package not available' });
+    }
+    if (!process.env.OPENAI_API_KEY) {
+      return res.status(500).json({ success: false, error: 'OPENAI_API_KEY not set' });
+    }
+
+    const imageB64  = req.file.buffer.toString('base64');
+    const mimeType  = req.file.mimetype || 'image/jpeg';
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [
+        { role: 'system', content: IMAGE_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image_url',
+              image_url: { url: `data:${mimeType};base64,${imageB64}` }
+            },
+            {
+              type: 'text',
+              text: 'Analyze this product image and generate a complete Meesho listing description.'
+            }
+          ]
+        }
+      ],
+      temperature: 0.4,
+      max_tokens: 800
+    });
+
+    const result = response.choices[0].message.content.trim();
+    return res.json({ success: true, result });
+
+  } catch (err) {
+    console.error('❌ /generate error:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
 });
 
-// ── Start ─────────────────────────────────────────────────────────────────────
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n🚀 Meesho AI Listing Server running at http://0.0.0.0:${PORT}`);
-  console.log('   Endpoints:');
- // console.log(`   POST http://localhost:${PORT}/validate-license    — Validate a license key`);
-  console.log(`   POST http://localhost:${PORT}/generate             — Generate from image (requires license)`);
-  console.log(`   POST http://localhost:${PORT}/generate-from-text   — Generate from text (requires license)`);
-  console.log(`   POST http://localhost:${PORT}/generate-from-form   — Generate from scanned form (requires license)`);
-  console.log(`   GET  http://localhost:${PORT}/health               — Health check`);
-  console.log('\n   Admin Endpoints (Basic Auth):');
-  console.log(`   POST http://localhost:${PORT}/admin/generate-key    — Generate new license key`);
-  console.log(`   GET  http://localhost:${PORT}/admin/keys           — List all license keys`);
-  console.log(`   GET  http://localhost:${PORT}/admin/stats           — Get license statistics`);
-  
-  if (!process.env.OPENAI_API_KEY) {
-    console.log('\n⚠️  OPENAI_API_KEY not set! Create a .env file:');
-    console.log('   echo "OPENAI_API_KEY=sk-..." > .env');
-  } else {
-    console.log('\n✅ OpenAI API key detected.');
-  }
-  
-  if (process.env.SKIP_LICENSE === 'true') {
-    console.log('\n⚠️  LICENSE VALIDATION DISABLED (development mode)');
-  } else {
-    console.log('\n✅ License validation enabled.');
-  }
-  console.log('');
+
+/* ================== HEALTH ================== */
+app.get("/health", (req, res) => {
+  res.json({ ok: true });
 });
 
+/* ================== START ================== */
+app.listen(PORT, "0.0.0.0", () => {
+  console.log("🚀 Server running on " + PORT);
+});
