@@ -512,7 +512,7 @@ IMPORTANT:
   }
 });
 /* ================== IMAGE ================== */
-app.post('/generate', requireLicense, upload.single('image'), async (req, res) => {
+app.post('/generate', upload.single('image'), requireLicense, async (req, res)
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No image file provided' });
@@ -527,7 +527,8 @@ app.post('/generate', requireLicense, upload.single('image'), async (req, res) =
 
     const imageB64  = req.file.buffer.toString('base64');
     const mimeType  = req.file.mimetype || 'image/jpeg';
-
+    const licenseKey = req.body.licenseKey || req.headers['x-license-key'];
+    const deviceId = req.body.deviceId || req.headers['x-device-id'];
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
