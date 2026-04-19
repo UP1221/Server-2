@@ -251,7 +251,7 @@ app.post('/generate-from-text', requireLicense, async (req, res) => {
  * Pads or truncates product_name to exactly `targetLen` characters.
  * Padding uses comma-separated SEO keywords.
  */
-function enforceProductNameLength(name, targetLen = 300) {
+function enforceProductNameLength(name, targetLen = 150) {
   if (!name) return name;
   if (name.length >= targetLen) return name.substring(0, targetLen);
   const keywords = [
@@ -279,7 +279,7 @@ function enforceProductNameLength(name, targetLen = 300) {
 }
  // Padding uses generic SEO-friendly product sentences with rich keywords.
  
-function enforceDescriptionLength(desc, targetLen = 1400) {
+function enforceDescriptionLength(desc, targetLen =700) {
   if (!desc) return desc;
   if (desc.length >= targetLen) return desc.substring(0, targetLen);
   const additions = [
