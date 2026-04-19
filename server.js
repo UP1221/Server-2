@@ -108,6 +108,30 @@ app.post("/admin/generate-key", (req, res) => {
   res.json({ success: true, key: newKey });
 });
 
+app.post('/validate-license', (req, res) => {
+  const { licenseKey, deviceId } = req.body;
+
+  if (!licenseKey || !deviceId) {
+    return res.json({ success: false, valid: false, error: "Missing data" });
+  }
+
+  const result = validateLicenseCore(licenseKey, deviceId);
+
+  if (!result.ok) {
+    return res.json({ success: false, valid: false, error: result.error });
+  }
+
+  const expiryDate = new Date(result.expiry);
+  const now = new Date();
+  const remainingDays = Math.ceil((expiryDate - now) / (1000 * 60 * 60 * 24));
+
+  res.json({
+    success: true,
+    valid: true,
+    expiry: result.expiry,
+    remainingDays
+  });
+});
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 const TEXT_SYSTEM_PROMPT = `
