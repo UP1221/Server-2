@@ -512,7 +512,7 @@ IMPORTANT:
   }
 });
 /* ================== IMAGE ================== */
-app.post('/generate', upload.single('image'), requireLicense, async (req, res)
+app.post('/generate', upload.single('image'), requireLicense, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ success: false, error: 'No image file provided' });
